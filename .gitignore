@@ -1,0 +1,18 @@
+# MAC OS
+.DS_Store
+# Python
+.venv/
+__pycache__/
+*.pyc
+# Jupyter Notebook
+.ipynb_checkpoints
+# Logs
+logs/
+*.log
+# Environment variables
+.env
+# VSCode
+.vscode/
+
+# Vector DB
+*.pkl
