@@ -206,7 +206,7 @@ qwen2.5:3b  | 3 | 13.035 | 13.031 | 238.00 | 30.34
 
 ---
 
-## 10. Resultados experimentales (ejemplo)
+## 10. Resultados experimentales
 
 A continuación se muestran resultados de ejemplo obtenidos en una Mac con chip M2 y 8 GB de RAM, para tres preguntas de prueba sobre la Ley de Aguas y decretos relacionados:
 
