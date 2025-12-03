@@ -212,11 +212,11 @@ A continuación se muestran resultados de ejemplo obtenidos en una Mac con chip 
 
 ### 10.1. Resumen por modelo (promedios)
 
-| Modelo      | N_preguntas | mean_wall_s | mean_total_s | mean_eval_tokens | mean_tokens_per_s |
-|------------|-------------|-------------|--------------|------------------|-------------------|
-| llama3.2:3b | 3           | 10.358      | 10.344       | 170.33           | 30.21             |
-| phi3:3.8b   | 3           | 14.761      | 14.726       | 231.67           | 25.07             |
-| qwen2.5:3b  | 3           | 13.035      | 13.031       | 238.00           | 30.34             |
+| Modelo      | N_preguntas | mean_wall_s | mean_total_s | mean_eval_tokens | mean_tokens_per_s | mean_overlap_coverage |
+|-------------|-------------|-------------|--------------|------------------|-------------------|-----------------------|
+| llama3.2:3b | 3           | 10.358      | 10.344       | 170.33           | 30.21             | 0.819                 |
+| phi3:3.8b   | 3           | 14.761      | 14.726       | 231.67           | 25.07             | 0.786                 |
+| qwen2.5:3b  | 3           | 13.035      | 13.031       | 238.00           | 30.34             | 0.752                 |
 
 
 - `llama3.2:3b` presenta la **menor latencia promedio** (menor `mean_wall_s`).

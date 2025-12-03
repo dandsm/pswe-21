@@ -5,6 +5,9 @@ import time
 import statistics as stats
 from typing import List, Dict, Any, Optional
 
+import re
+import unicodedata
+
 import numpy as np
 from pypdf import PdfReader
 import ollama
@@ -110,6 +113,39 @@ def retrieve(query: str, store: List[Dict[str, Any]], k: int = TOP_K) -> List[Di
     return [c for _, c in scored[:k]]
 
 
+# ========= OVERLAP MÉTRIC =========
+
+def _normalize_tokens(text: str) -> set[str]:
+    """Normaliza a minúsculas, quita acentos y devuelve conjunto de tokens alfanuméricos."""
+    text = text.lower()
+    text = "".join(
+        c for c in unicodedata.normalize("NFD", text)
+        if unicodedata.category(c) != "Mn"
+    )
+    tokens = re.findall(r"\b\w+\b", text)
+    return set(tokens)
+
+
+def compute_overlap_metric(question: str, answer) -> tuple[Optional[float], Optional[float]]:
+    """
+    Devuelve:
+    - overlap_jaccard: |Q ∩ A| / |Q ∪ A|
+    - overlap_coverage: |Q ∩ A| / |Q|  (qué porcentaje de tokens de la pregunta aparece en la respuesta)
+    """
+    q_tokens = _normalize_tokens(question)
+    a_tokens = _normalize_tokens(answer)
+
+    if not q_tokens or not a_tokens:
+        return None, None
+
+    inter = q_tokens & a_tokens
+    union = q_tokens | a_tokens
+
+    overlap_jaccard = len(inter) / len(union) if union else 0.0
+    overlap_coverage = len(inter) / len(q_tokens) if q_tokens else 0.0
+    return overlap_jaccard, overlap_coverage
+
+
 # ========= PROMPT DEL CONSULTOR AMBIENTAL =========
 
 def build_prompt(question: str, contexts: List[Dict[str, Any]]) -> str:
@@ -165,7 +201,7 @@ def answer_with_model(
         model=model_name,
         messages=[{"role": "user", "content": prompt}],
         options=options,
-        stream=False,  # necesario para obtener métricas en un solo JSON :contentReference[oaicite:1]{index=1}
+        stream=False,  # necesario para obtener métricas en un solo JSON
     )
     end_wall = time.perf_counter()
 
@@ -190,9 +226,12 @@ def answer_with_model(
 
     tokens_per_s = (
         eval_count / eval_duration_s if eval_duration_s > 0 else None
-    )  # fórmula recomendada por la doc oficial :contentReference[oaicite:2]{index=2}
+    )
 
     answer_text = resp["message"]["content"] if isinstance(resp, dict) else resp.message.content
+
+    # === Overlap metric ===
+    overlap_jaccard, overlap_coverage = compute_overlap_metric(question, answer_text)
 
     return {
         "model": model_name,
@@ -205,6 +244,8 @@ def answer_with_model(
         "tokens_per_s": tokens_per_s,
         "prompt_tokens": prompt_eval_count,
         "prompt_eval_duration_s": prompt_eval_duration_s,
+        "overlap_jaccard": overlap_jaccard,
+        "overlap_coverage": overlap_coverage,
     }
 
 
@@ -243,12 +284,18 @@ def benchmark_models(
 
             # Imprime resumen corto por corrida
             print(metrics['answer'].strip().replace("\n", " ")[:200] + "...")
+            overlap_cov = metrics["overlap_coverage"]
+            overlap_jac = metrics["overlap_jaccard"]
             print(
                 f"    wall_time_s={metrics['wall_time_s']:.3f}  "
                 f"total_duration_s={metrics['total_duration_s']:.3f}  "
                 f"eval_tokens={metrics['eval_tokens']}  "
                 f"tokens_per_s="
-                f"{metrics['tokens_per_s']:.1f}" if metrics['tokens_per_s'] else "N/A"
+                f"{metrics['tokens_per_s']:.1f}  "
+                f"overlap_coverage={overlap_cov:.3f}  "
+                f"overlap_jaccard={overlap_jac:.3f}"
+                if metrics['tokens_per_s'] is not None and overlap_cov is not None and overlap_jac is not None
+                else "    (métricas de overlap no disponibles)"
             )
 
     return all_results
@@ -264,7 +311,7 @@ def summarize_results(all_results: List[Dict[str, Any]]) -> None:
     print("\n\n=========== RESUMEN POR MODELO (PROMEDIOS) ===========\n")
     header = (
         "Modelo | N_preguntas | mean_wall_s | mean_total_s | "
-        "mean_eval_tokens | mean_tokens_per_s"
+        "mean_eval_tokens | mean_tokens_per_s | mean_overlap_coverage"
     )
     print(header)
     print("-" * len(header))
@@ -274,29 +321,39 @@ def summarize_results(all_results: List[Dict[str, Any]]) -> None:
         total = [r["total_duration_s"] for r in rows]
         eval_tokens = [r["eval_tokens"] for r in rows]
         tps = [r["tokens_per_s"] for r in rows if r["tokens_per_s"] is not None]
+        overlaps_cov = [r["overlap_coverage"] for r in rows if r["overlap_coverage"] is not None]
+
+        mean_tps = stats.mean(tps) if tps else float("nan")
+        mean_overlap_cov = stats.mean(overlaps_cov) if overlaps_cov else float("nan")
 
         print(
             f"{model} | {len(rows)} | "
             f"{stats.mean(wall):.3f} | "
             f"{stats.mean(total):.3f} | "
             f"{stats.mean(eval_tokens)} | "
-            f"{stats.mean(tps) if tps else float('nan')}"
+            f"{mean_tps:.3f} | "
+            f"{mean_overlap_cov:.3f}"
         )
 
     # También imprimimos en formato CSV para copiar/pegar
     print("\n\n=========== CSV PARA ARTÍCULO (por corrida) ===========\n")
     print(
         "model,question,wall_time_s,total_duration_s,eval_tokens,eval_duration_s,"
-        "tokens_per_s,prompt_tokens,prompt_eval_duration_s"
+        "tokens_per_s,prompt_tokens,prompt_eval_duration_s,overlap_jaccard,overlap_coverage"
     )
     for r in all_results:
         q_short = r["question"].replace("\n", " ").replace(",", ";")
+        tokens_per_s_str = "" if r["tokens_per_s"] is None else f"{r['tokens_per_s']:.6f}"
+        overlap_j_str = "" if r["overlap_jaccard"] is None else f"{r['overlap_jaccard']:.6f}"
+        overlap_c_str = "" if r["overlap_coverage"] is None else f"{r['overlap_coverage']:.6f}"
+
         print(
             f"{r['model']},{q_short},"
             f"{r['wall_time_s']:.6f},{r['total_duration_s']:.6f},"
             f"{r['eval_tokens']},{r['eval_duration_s']:.6f},"
-            f"{r['tokens_per_s']:.6f},"
-            f"{r['prompt_tokens']},{r['prompt_eval_duration_s']:.6f}"
+            f"{tokens_per_s_str},"
+            f"{r['prompt_tokens']},{r['prompt_eval_duration_s']:.6f},"
+            f"{overlap_j_str},{overlap_c_str}"
         )
 
 
